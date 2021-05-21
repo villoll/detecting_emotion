@@ -1,0 +1,184 @@
+<html>
+    <head>
+        <title>Detecting emotions</title>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.6.0/dist/tf.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@0.0.3/dist/face-landmarks-detection.min.js"></script>
+        
+    </head>
+    <body>
+        <canvas id="output"></canvas>
+        <video id="webcam" playsinline style="
+            visibility: hidden;
+            width: auto;
+            height: auto;
+            ">
+        </video>
+        <h1 id="status">Loading...</h1>
+        <img id="smile-angry" src="web/smiles/angry.png" style="visibility: hidden;" />
+        <img id="smile-disgust" src="web/smiles/disgust.png" style="visibility: hidden;" />
+        <img id="smile-fear" src="web/smiles/fear.png" style="visibility: hidden;" />
+        <img id="smile-happy" src="web/smiles/happy.png" style="visibility: hidden;" />
+        <img id="smile-neutral" src="web/smiles/neutral.png" style="visibility: hidden;" />
+        <img id="smile-sad" src="web/smiles/sad.png" style="visibility: hidden;" />
+        <img id="smile-surprise" src="web/smiles/surprise.png" style="visibility: hidden;" />
+        <script>
+            
+        function setText( text ) {
+            document.getElementById( "status" ).innerText = text;
+        }
+
+
+        async function setupWebcam() {
+            return new Promise( ( resolve, reject ) => {
+                const webcamElement = document.getElementById( "webcam" );
+                const navigatorAny = navigator;
+                navigator.getUserMedia = navigator.getUserMedia ||
+                navigatorAny.webkitGetUserMedia || navigatorAny.mozGetUserMedia ||
+                navigatorAny.msGetUserMedia;
+                if( navigator.getUserMedia ) {
+                    navigator.getUserMedia( { video: true },
+                        stream => {
+                            webcamElement.srcObject = stream;
+                            webcamElement.addEventListener( "loadeddata", resolve, false );
+                        },
+                    error => reject());
+                }
+                else {
+                    reject();
+                }
+            });
+        }
+
+        const emotions = [ "angry", "disgust", "fear", "happy", "neutral", "sad", "surprise" ];
+        let emotionModel = null;
+
+        let output = null;
+        let model = null;
+
+        let currentEmotion = "neutral";
+        let smile = { scale: { x: 10, y: 10 }, position: { x: 50, y: 50 } };
+
+        async function predictEmotion( points ) {
+            let result = tf.tidy( () => {
+                const xs = tf.stack( [ tf.tensor1d( points ) ] );
+                return emotionModel.predict( xs );
+            });
+            let prediction = await result.data();
+            result.dispose();
+            
+            let number = prediction.indexOf( Math.max( ...prediction ) );
+            return emotions[ number ];
+        }
+
+        async function trackFace() {
+            const video = document.querySelector( "video" );
+            const faces = await model.estimateFaces( {
+                input: video,
+                returnTensors: false,
+                flipHorizontal: false,
+            });
+            output.drawImage(
+                video,
+                0, 0, video.width, video.height,
+                0, 0, video.width, video.height
+            );
+            let smileImage = document.getElementById( `smile-${currentEmotion}` );
+            output.save();
+            output.translate( -smileImage.width, -smileImage.height );
+            output.translate( smile.position.x, smile.position.y );
+            output.drawImage(
+                smileImage,
+                0, 0, smileImage.width, smileImage.height,
+                0, 0, smileImage.width * smile.scale * 2, smileImage.height * smile.scale * 2
+            );
+            output.restore();
+
+            let points = null;
+            faces.forEach( face => {
+                const x1 = face.boundingBox.topLeft[ 0 ];
+                const y1 = face.boundingBox.topLeft[ 1 ];
+                const x2 = face.boundingBox.bottomRight[ 0 ];
+                const y2 = face.boundingBox.bottomRight[ 1 ];
+                const bWidth = x2 - x1;
+                const bHeight = y2 - y1;
+
+                const features = [
+                    "noseTip",
+                    "leftCheek",
+                    "rightCheek",
+                    "leftEyeLower1", "leftEyeUpper1",
+                    "rightEyeLower1", "rightEyeUpper1",
+                    "leftEyebrowLower", 
+                    "rightEyebrowLower", 
+                    "lipsLowerInner", 
+                    "lipsUpperInner", 
+                ];
+                points = [];
+                features.forEach( feature => {
+                    face.annotations[ feature ].forEach( x => {
+                        points.push( ( x[ 0 ] - x1 ) / bWidth );
+                        points.push( ( x[ 1 ] - y1 ) / bHeight );
+                    });
+                });
+
+                const faceScale =  1;
+                let upX = face.annotations.midwayBetweenEyes[ 0 ][ 0 ] - face.annotations.noseBottom[ 0 ][ 0 ];
+                let upY = face.annotations.midwayBetweenEyes[ 0 ][ 1 ] - face.annotations.noseBottom[ 0 ][ 1 ];
+                const length = Math.sqrt( upX ** 2 + upY ** 2 );
+                upX /= length;
+                upY /= length;
+
+                smile = {
+                    scale: faceScale,
+                    position: {
+                        x: face.annotations.midwayBetweenEyes[ 0 ][ 0 ] + upX * 100 * faceScale,
+                        y: face.annotations.midwayBetweenEyes[ 0 ][ 1 ] + upY * 100 * faceScale,
+                    }
+                };
+            });
+
+            if( points ) {
+                let emotion = await predictEmotion( points );
+                setText( `Обнаружено: ${emotion}` );
+                currentEmotion = emotion;
+            }
+            else {
+                setText( "No Face" );
+            }
+
+            requestAnimationFrame( trackFace );
+        }
+
+        (async () => {
+            await setupWebcam();
+            const video = document.getElementById( "webcam" );
+            video.play();
+            let videoWidth = video.videoWidth;
+            let videoHeight = video.videoHeight;
+            video.width = videoWidth;
+            video.height = videoHeight;
+
+            let canvas = document.getElementById( "output" );
+            canvas.width = video.width;
+            canvas.height = video.height;
+
+            output = canvas.getContext( "2d" );
+            output.translate( canvas.width, 0 );
+            output.scale( -1, 1 ); 
+            output.fillStyle = "#fdffb6";
+            output.strokeStyle = "#fdffb6";
+            output.lineWidth = 2;
+
+            model = await faceLandmarksDetection.load(
+                faceLandmarksDetection.SupportedPackages.mediapipeFacemesh
+            );
+           
+            emotionModel = await tf.loadLayersModel( 'web/model/facemo.json' );
+
+            setText( "Loaded!" );
+
+            trackFace();
+        })();
+        </script>
+    </body>
+</html>
