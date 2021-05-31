@@ -21,6 +21,13 @@
         <img id="smile-neutral" src="web/smiles/neutral.png" style="visibility: hidden;" />
         <img id="smile-sad" src="web/smiles/sad.png" style="visibility: hidden;" />
         <img id="smile-surprise" src="web/smiles/surprise.png" style="visibility: hidden;" />
+        
+        <form>
+            <input type="button" id="record"  value="Start Recording">
+            <input type="button" id="stop"  value="Stop Recording">
+            <input type="button" id="download"  value="Download video">
+            </form>
+        
         <script>
             
         function setText( text ) {
@@ -147,6 +154,55 @@
             }
 
             requestAnimationFrame( trackFace );
+            
+            var recordButton = document.querySelector("#record");
+            var stopButton = document.querySelector("#stop");
+            var downloadButton = document.querySelector("#download");
+
+            var recorder;
+
+            recordButton.addEventListener('click', startRecording);
+            stopButton.addEventListener('click', stopRecording);
+            downloadButton.addEventListener('click', download);
+
+            
+            function startRecording() {
+                recorder = new RecordRTCPromisesHandler(video, {
+                    mimeType: 'video/webm',
+                    bitsPerSecond: 128000
+                }); 
+                
+                recorder.startRecording().then(function() {
+                    console.info('Recording video ...');
+                }).catch(function(error) {
+                    console.error('Cannot start video recording: ', error);
+                });
+
+                recorder.stream = video;
+
+            }
+
+            function stopRecording() {
+                    recorder.stopRecording().then(function() {
+                    console.info('stopRecording success');
+                    });
+            }
+            
+            function download() {
+                var blob = recorder.getBlob();
+                var url = window.URL.createObjectURL(blob);
+                var a = document.createElement("a");
+                a.style.display = "none";
+                a.href = url;
+                a.download = "test.webm";
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+
+            }
         }
 
         (async () => {
